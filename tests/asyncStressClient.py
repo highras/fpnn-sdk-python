@@ -19,7 +19,7 @@ class MyCallback(Fpnn.FpnnCallback):
 	
 		recv_time = datetime.utcnow()
 		diff = recv_time - self._send_time
-		self._instance.addTimeCost(diff)	
+		self._instance.addTimeCost(int((diff.total_seconds())/86400 ))	
 	    else:
 		self._instance.incRecvError()
 
@@ -59,7 +59,7 @@ class asyncStressClient:
 	with self.locker:
 	    self._recvError += 1
 
-    def addTimecost(self, cost):
+    def addTimeCost(self, cost):
 	with self.locker:
 	    self._timecost += cost
 
@@ -154,6 +154,6 @@ class asyncStressClient:
 
 
 if __name__ == '__main__':
-    tester = asyncStressClient("localhost", 13099, 30, 30)
+    tester = asyncStressClient("localhost", 13697, 5, 5)
     tester.launch()	
     tester.showStatistics()

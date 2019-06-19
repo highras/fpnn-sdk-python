@@ -9,13 +9,7 @@ import Fpnn
 lock = threading.Lock()
 seq = 0
 
-client = Fpnn.Client('35.167.185.139', 13099)
-f = open('../server-public.pem')
-peerPubData = f.read()
-f.close()
-
-client.enableEncryptor(peerPubData)
-
+client = Fpnn.TCPClient('localhost', 13697)
 
 def getSeq():
     global lock, seq
@@ -42,19 +36,6 @@ def asyncTest():
         client.sendQuest('test', {'seqNum': seqNum}, MyCallback(seqNum))
         time.sleep(random.random())
 
-def syncTest():
-    global client
-    while (True):
-        seqNum = getSeq()
-        try:
-            answer = client.sendQuestSync('test', {'seqNum': seqNum})
-            readSeqNum = int(answer['seqNum'])
-            if readSeqNum != seqNum:
-                print "exception: seqnum wrong\n"
-        except Exception, e:
-            print "exception: " + e.message + "\n"
-        time.sleep(random.random())
-
 def main():
     threads = []
     for i in range(0, 20):
@@ -63,12 +44,6 @@ def main():
         t.start()
         threads.append(t)
 
-    for i in range(0, 20):
-        t = threading.Thread(target=syncTest, args=())
-        t.setDaemon(True)
-        t.start()
-        threads.append(t)
-    
     while (True):
         time.sleep(1)
 

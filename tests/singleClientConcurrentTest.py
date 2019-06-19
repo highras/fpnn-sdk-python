@@ -71,10 +71,7 @@ class singleClientConcurrentTest:
 	    else:
 		act = index & 0x1
 	    try:
-		if act == 0:
-		    print("*", end='')
-		    answer = self.client.sendQuestSync('test', {'aaa': 'bbb'}, 5)
-		elif act == 1:
+		if act == 0 or act == 1:
 		    print("&", end='')
 		    self.client.sendQuest('test', {'aaa': 'bbb'}, MyCallback(), 5)
 		elif act == 2:
@@ -113,5 +110,5 @@ class singleClientConcurrentTest:
         self.test(3, 30000);
                     
 if __name__ == '__main__':
-    tester = singleClientConcurrentTest("localhost", 13099) 
+    tester = singleClientConcurrentTest("localhost", 13697) 
     tester.launch()
