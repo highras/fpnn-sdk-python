@@ -28,6 +28,10 @@ FPNN_MT_ANSWER = 2
 class FpnnCallback:
     timeoutSecond = 0
     createTime = 0
+
+    syncSemaphore = None
+    syncAnswer = answer = None
+    syncException = None
     
     def callback(self, answer, exception):
         pass
@@ -265,7 +269,7 @@ class TCPClient(object):
 
     def sendAll(self, buffer):
         with self.sockLock:
-	        self.socket.sendall(buffer)
+            self.socket.sendall(buffer)
 
     def recvAll(self, data_len):
         buffer = b''
@@ -353,6 +357,22 @@ class TCPClient(object):
 
         self.send(method, params, cb)
 
+    def sendQuestSync(self, method, params, timeout = 0):
+        cb = FpnnCallback()
+        cb.syncSemaphore = threading.Semaphore(0)
+        cb.syncAnswer = None
+        cb.syncException = None
+        cb.timeoutSecond = timeout
+        cb.createTime = int(time.time())
+        self.send(method, params, cb)
+     
+        cb.syncSemaphore.acquire()
+      
+        if cb.syncException == None:
+            return cb.syncAnswer
+        else:
+            raise cb.syncException
+
     def send(self, method, params, cb = None):
         try:
             oneway = (method != "*key" and cb == None)
@@ -387,8 +407,13 @@ class TCPClient(object):
 
     def invokeCallback(self, cb, answer, exception):
         if cb != None:
-            with self.asyncCallbackQueueLock:
-                self.asyncCallbackQueue.put(AsyncCallback(cb, answer, exception))
+            if cb.syncSemaphore == None:
+                with self.asyncCallbackQueueLock:
+                    self.asyncCallbackQueue.put(AsyncCallback(cb, answer, exception))
+            else:
+                cb.syncAnswer = answer
+                cb.syncException = exception
+                cb.syncSemaphore.release()
 
     def exceptionFlushAll(self):
         with self.dictLock:

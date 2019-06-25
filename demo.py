@@ -31,6 +31,14 @@ def main():
     client.sendQuest('test', {'aaa': 'bbb'}, MyQuestCallback())
     client.sendQuest('test', {'aaa': 'bbb'}, MyQuestCallback())
 
+    try:
+        answer = client.sendQuestSync('test', {'aaa': 'bbb', 'sync': 123})
+        print 'sync answer:'
+        print answer
+    except Exception,e:
+        print 'sync exception:'
+        print e.message
+
     time.sleep(1)
     client.close()
 
