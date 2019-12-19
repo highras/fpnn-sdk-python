@@ -7,7 +7,7 @@ import threading
 import hashlib
 import socket
 import msgpack
-import Queue
+import queue 
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
@@ -56,7 +56,7 @@ class Header(object):
 
     def pack(self):
         return struct.pack('<4sBBBBI',
-                           self.magic,
+                           self.magic.encode('utf-8'),
                            self.version,
                            self.flag,
                            self.mtype,
@@ -90,7 +90,7 @@ class Quest(object):
         if self.header.mtype == FPNN_MT_TWOWAY:
             packet += struct.pack('<I', self.seqNum)
         packet += struct.pack('!%ds%ds' % (len(self.method), len(self.payload)),
-                              self.method,
+                              self.method.encode('utf-8'),
                               self.payload)
         return packet
 
@@ -119,7 +119,7 @@ class TCPClient(object):
         self.checkTimer = None
         self.connectCb = None
         self.closeCb = None
-        self.asyncCallbackQueue = Queue.Queue(maxsize = 0)
+        self.asyncCallbackQueue = queue.Queue(maxsize = 0)
         self.asyncCallbackQueueLock = threading.Lock()
         self.autoReconnect = autoReconnect
         self.startAsyncCallbackThread()
@@ -276,11 +276,11 @@ class TCPClient(object):
         while True:
             try:
                 recv_bytes = self.socket.recv(data_len)
-            except socket.timeout, e:
+            except socket.timeout as e:
                 if self.stop:
                     raise Exception("connect close")
                 continue
-            except Exception, e:
+            except Exception as e:
                 raise Exception("connect close")
 
             if recv_bytes == '':
@@ -296,7 +296,7 @@ class TCPClient(object):
             ac = None
             try:
                 ac = self.asyncCallbackQueue.get(True, 0.2)
-            except Exception, e:
+            except Exception as e:
                 if self.stop:
                     break
                 else:
@@ -332,7 +332,7 @@ class TCPClient(object):
                 
                 self.invokeCallback(cb, answer, None)
 
-            except Exception, e:
+            except Exception as e:
                 try:
                     if self.closeCb != None:
                         self.closeCb.callback(self.stop == False)
@@ -386,7 +386,7 @@ class TCPClient(object):
 
             if self.isEncryptor and method != "*key":
                 encryptBuffer = self.encrypt(buffer, True)
-                buffer = struct.pack('<I' + str(len(buffer)) + 's', len(buffer), encryptBuffer)
+                buffer = struct.pack('<I' + str(len(buffer)) + 's', len(buffer), encryptBuffer.encode('utf-8'))
 
             self.sendAll(buffer)
 
@@ -397,11 +397,11 @@ class TCPClient(object):
            
             self.putCb(quest.seqNum, cb)
 
-        except Exception, e:
+        except Exception as e:
             if self.autoReconnect:
                 try:
                     self.reconnect()
-                except Exception, e:
+                except Exception as e:
                     pass
             self.invokeCallback(cb, None, e)
 

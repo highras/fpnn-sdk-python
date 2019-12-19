@@ -16,28 +16,29 @@ def main():
     class MyQuestCallback(Fpnn.FpnnCallback):
         def callback(self, answer, exception):
             if exception == None:
-                print "answer: "
-                print answer
+                print("answer: ")
+                print(answer)
             else:
-                print "exception: " 
-                print repr(exception)
+                print("exception: ") 
+                print(repr(exception))
    
     client = Fpnn.TCPClient('localhost', 13697)
     
     client.setConnectionConnectedCallback(MyConnectedCallback())
     client.setConnectionWillCloseCallback(MyConnectionWillCloseCallback())
 
-    client.sendQuest('test', {'aaa': 'bbb'}, MyQuestCallback())
-    client.sendQuest('test', {'aaa': 'bbb'}, MyQuestCallback())
-    client.sendQuest('test', {'aaa': 'bbb'}, MyQuestCallback())
+    client.sendQuest('two way demo', {'aaa': 'bbb'}, MyQuestCallback())
+    client.sendQuest('two way demo', {'aaa': 'bbb'}, MyQuestCallback())
+    client.sendQuest('two way demo', {'aaa': 'bbb'}, MyQuestCallback())
+    client.sendQuest('one way demo', {'aaa': 'bbb'})
 
     try:
-        answer = client.sendQuestSync('test', {'aaa': 'bbb', 'sync': 123})
-        print 'sync answer:'
-        print answer
-    except Exception,e:
-        print 'sync exception:'
-        print e.message
+        answer = client.sendQuestSync('two way demo', {'aaa': 'bbb', 'sync': 123})
+        print("sync answer:")
+        print(answer)
+    except Exception as e:
+        print("sync exception:")
+        print(e.message)
 
     time.sleep(1)
     client.close()
