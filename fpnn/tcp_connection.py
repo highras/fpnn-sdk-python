@@ -189,11 +189,11 @@ class TCPConnection(object):
                             if send > 0:
                                 buffer = buffer[send:]
                                 self.out_queue[0] = buffer
-                                return False
+                            return False
                         elif error.errno == errno.EINTR:
                             if send > 0:
                                 buffer = buffer[send:]
-                                continue
+                            continue
                         else:
                             return True
                     except:
