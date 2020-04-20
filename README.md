@@ -1,5 +1,13 @@
+## FPNN PYTHON SDK
+
 ## Requirements
 
-* msgpack-python 
+* Python 3+
+
+* selectors
+
+* msgpack
 
 * cryptography
+
+### TODO

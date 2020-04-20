@@ -1,114 +1,132 @@
-# coding: utf-8
-from __future__ import print_function
+#encoding=utf8
 import sys
-sys.path.append("../")
-import time
-import struct
+sys.path.append("..")
 import threading
-from datetime import datetime
-import Fpnn
+import time
 
-class MyConnectedCallback(Fpnn.FpnnConnectedCallback):
-    def callback(self):
-        print("+", end='')
+from fpnn import *
 
-class MyConnectionWillCloseCallback(Fpnn.FpnnConnectionWillCloseCallback):
-    def callback(self, causedByError):
-        if causedByError:
-            print("#", end='')
+class MyConnectionCallback(ConnectionCallback):
+        def connected(self, connection_id, endpoint):
+            print("+", end="", flush=True)
+
+        def closed(self, connection_id, endpoint, caused_by_error):
+            if caused_by_error:
+                print("#", end="", flush=True)
+            else:
+                print("~", end="", flush=True)
+
+class MyCallback(QuestCallback):
+    def callback(self, answer):
+        if answer.is_error():
+            if answer.error_code == FPNN_ERROR.FPNN_EC_CONNECTION_IS_CLOSE.value:
+                print(";", end="", flush=True)
+            else:
+                print("@", end="", flush=True)
         else:
-            print("~", end='')
+            print("$", end="", flush=True)
 
-class MyCallback(Fpnn.FpnnCallback):
-    def callback(self, answer, exception):
-	if exception == None:
-	    print("$", end='')
-	else:
-	    print("@", end='')
-
-class singleClientConcurrentTest:
+class Tester(object):
     def __init__(self, ip, port):
-	self.client = Fpnn.TCPClient(ip, port)
-        self.client.setConnectionConnectedCallback(MyConnectedCallback())
-        self.client.setConnectionWillCloseCallback(MyConnectionWillCloseCallback())
-	
-    def showSignDesc(self):
-	print("Sign:")
-	print("    +: establish connection")
-	print("    ~: close connection")
-	print("    #: connection error")
+        self.client = TCPClient(ip, port)
+        self.client.set_connection_callback(MyConnectionCallback())
 
-	print("    *: send sync quest")
-	print("    &: send async quest")
+    def ShowSignDesc(self):
+        print("Sign:")
+        print("    +: establish connection")
+        print("    -: connect failed")
+        print("    ~: close connection")
+        print("    #: connection error")
 
-	print("    ^: sync answer Ok")
-	print("    ?: sync answer exception")
-	print("    |: sync answer exception by connection closed")
-	print("    (: sync operation fpnn exception")
-	print("    ): sync operation unknown exception")
+        print("    *: send sync quest")
+        print("    &: send async quest")
 
-	print("    $: async answer Ok")
-	print("    @: async answer exception")
-	print("    ;: async answer exception by connection closed")
-	print("    {: async operation fpnn exception")
-	print("    }: async operation unknown exception")
+        print("    ^: sync answer Ok")
+        print("    ?: sync answer exception")
+        print("    |: sync answer exception by connection closed")
+        #print("    (: sync operation fpnn exception")
+        #print("    ): sync operation unknown exception")
 
-	print("    !: close operation")
-	print("    [: close operation fpnn exception")
-	print("    ]: close operation unknown exception")
-  
-    def testThread(self, count):
-	act = 0
-	for i in range(count):
-	    index = datetime.now().microsecond % 64
-	    if i >= 10:
-		if index < 6:
-		    act = 2
-		elif index < 32:
-		    act = 1
-		else:
-		    act = 0
-	    else:
-		act = index & 0x1
-	    try:
-		if act == 0 or act == 1:
-		    print("&", end='')
-		    self.client.sendQuest('test', {'aaa': 'bbb'}, MyCallback(), 5)
-		elif act == 2:
-		    print("!", end='')
-		    self.close()
+        print("    $: async answer Ok")
+        print("    @: async answer exception")
+        print("    ;: async answer exception by connection closed")
+        #print("    {: async operation fpnn exception")
+        #print("    }: async operation unknown exception")
 
-	    except Exception, e:
-                if act == 0:
-		    print(')', end='')
-		elif act == 1:
-		    print('}', end='')
-		elif act == 2:
-		    print(']', end='') 
-        print("finish")
- 
-    def test(self, threadCount, questCount):
-	print("========[ Test: thread " + str(threadCount) + ", per thread quest: " + str(questCount) + " ]==========")
-	_threads = []
+        print("    !: close operation")
+        #print("    [: close operation fpnn exception")
+        #print("    ]: close operation unknown exception")
 
-	for i in range(threadCount):
-	    t = threading.Thread(target=singleClientConcurrentTest.testThread, args=(self, questCount))
-	    t.setDaemon(True)
-            t.start()
-            _threads.append(t)
+    def GenQuest(self):
+        quest = Quest("two way demo")
+        quest.param("quest", "one")
+        quest.param("int", 2)
+        quest.param("double", 3.3)
+        quest.param("boolean", True)
+        quest.param("ARRAY", ["first_vec", 4])
+        quest.param("MAP", {"map1":"first_map", "map2":True, "map3":5, "map4":5.7, "map5":"中文"});
+        return quest
 
-	time.sleep(5)
+    def TestWorker(self):
+        act = 0
+        for i in range(self.questCount):
+            index = (int(round(time.time() * 1000)) + i) % 64
 
-	for t in _threads:
-	    t.join()
-        print("join all threads")
-        self.client.close()
-        print("closed")
+            if i >= 10:
+                if index < 6:
+                    act = 2    #-- close operation
+                elif index < 32:
+                    act = 1    #-- async quest
+                else:
+                    act = 0    #-- sync quest
+            else:
+                act = int(index & 0x1)
 
-    def launch(self):
-        self.showSignDesc()
-        self.test(3, 30000);
-                    
-if __name__ == '__main__':
-    tester = singleClientConcurrentTest("localhost", 13697) 
-    tester.launch()
+            if act == 0:
+                print("*", end="", flush=True)
+                answer = self.client.send_quest(self.GenQuest())
+                if answer.is_error():
+                    if answer.error_code == FPNN_ERROR.FPNN_EC_CONNECTION_IS_CLOSE.value:
+                        print("|", end="", flush=True)
+                    else:
+                        print("?", end="", flush=True)
+                else:
+                    print("^", end="", flush=True)
+            elif act == 1:
+                print("&", end="", flush=True)
+                self.client.send_quest(self.GenQuest(), MyCallback())
+            else:
+                print("!", end="", flush=True)
+                self.client.close()
+
+    def Test(self, threadCount, perThreadQuestCount):
+        self.questCount = perThreadQuestCount
+        print("========[ Test: thread {0}, per thread quest: {1} ]==========".format(threadCount, perThreadQuestCount))
+
+        threads = []
+        for index in range(threadCount):
+            thread = threading.Thread(target=Tester.TestWorker, args=(self,))
+            thread.start()
+            threads.append(thread)
+
+        time.sleep(5)
+
+        for thread in threads:
+            thread.join()
+        print("")
+
+if  __name__=="__main__":
+    if len(sys.argv) != 3:
+        print("Usage: singleClientConcurrentTest.py <ip> <port>")
+        exit(0)
+
+    tester = Tester(sys.argv[1], int(sys.argv[2]))
+    tester.ShowSignDesc()
+
+    tester.Test(10, 30000)
+    tester.Test(20, 30000)
+    tester.Test(30, 30000)
+    tester.Test(50, 30000)
+    tester.Test(60, 30000)
+
+

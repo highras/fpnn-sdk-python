@@ -1,159 +1,166 @@
-# coding: utf-8
+#encoding=utf8
 import sys
-sys.path.append("../")
-import time
-import struct
+sys.path.append("..")
 import threading
-from datetime import datetime
-import Fpnn
+import time
 
-class MyCallback(Fpnn.FpnnCallback):
+from fpnn import *
 
-	def __init__(self, instance, send_time):
-	    self._instance = instance
-	    self._send_time = send_time
+class MyCallback(QuestCallback):
+    def __init__(self, tester, send_time):
+        self.tester = tester
+        self.send_time = send_time
 
-	def callback(self, answer, exception):
-	    if exception == None:
-		self._instance.incRecv()
-	
-		recv_time = datetime.utcnow()
-		diff = recv_time - self._send_time
-		self._instance.addTimeCost(int((diff.total_seconds())/86400 ))	
-	    else:
-		self._instance.incRecvError()
+    def callback(self, answer):
+        if answer.is_error():
+            with self.tester.countLock:
+                self.tester.recvErrorCount += 1
+            if answer.error_code == FPNN_ERROR.FPNN_EC_QUEST_TIMEOUT.value:
+                with self.tester.countLock:
+                    print("Timeouted occurred when recving.")
+            else:
+                print("Error occurred when recving..")
+        else:
+            with self.tester.countLock:
+                self.tester.recvCount += 1
+            recv_time = int(round(time.time() * 1000 * 1000))
+            diff = recv_time - self.send_time
+            with self.tester.countLock:
+                self.tester.timeCost += diff
 
-class asyncStressClient:
-    def __init__(self, ip, port, thread_num, qps):
-        self._ip = ip
-        self._port = port
-        self._thread_num = thread_num
-        self._qps = qps
-       	self._send = 0
-	self._recv = 0
-	self._sendError = 0
-	self._recvError = 0
-	self._timecost = 0 
-	self.locker = threading.Lock()
-	self._threads = []
+
+class Tester(object):
+    def __init__(self, ip, port, threadCount, qps):
+        self.ip = ip
+        self.port = port
+        self.threadCount = threadCount
+        self.qps = qps
+        self.running = True
+        self.countLock = threading.Lock()
+        self.sendCount = 0
+        self.recvCount = 0
+        self.recvErrorCount = 0
+        self.timeCost = 0
+        self.threads = []
 
     def __del__(self):
-	self.stop()
+        self.Close()
 
-    def stop(self):
-	pass
+    def Close(self):
+        self.Stop()
 
-    def incSend(self): 
-	with self.locker:
-	    self._send += 1
+    def Stop(self):
+        self.running = False
+        for thread in self.threads:
+            thread.join()
 
-    def incRecv(self):
-	with self.locker:
-	    self._recv += 1
+    def Launch(self):
+        pqps = self.qps / self.threadCount
+        if pqps == 0:
+            pqps = 1
 
-    def incSendError(self):
-	with self.locker:
-	    self._sendError += 1
+        remain = self.qps - pqps * self.threadCount
 
-    def incRecvError(self):
-	with self.locker:
-	    self._recvError += 1
+        for i in range(self.threadCount):
+            thread = threading.Thread(target=Tester.TestWorker, args=(self, pqps))
+            thread.start()
+            self.threads.append(thread)
 
-    def addTimeCost(self, cost):
-	with self.locker:
-	    self._timecost += cost
+        if remain > 0:
+            thread = threading.Thread(target=Tester.TestWorker, args=(self, remain))
+            thread.start()
+            self.threads.append(thread)
 
-    def stop(self):
-	for t in self._threads:
-	    t.join()
+    def GenQuest(self):
+        quest = Quest("two way demo")
+        quest.param("quest", "one")
+        quest.param("int", 2)
+        quest.param("double", 3.3)
+        quest.param("boolean", True)
+        quest.param("ARRAY", ["first_vec", 4])
+        quest.param("MAP", {"map1":"first_map", "map2":True, "map3":5, "map4":5.7, "map5":"中文"});
+        return quest
 
-    def launch(self):
-	pqps = self._qps / self._thread_num
-	if (pqps == 0):
-	    pqps = 1
-	remain = self._qps - pqps * self._thread_num
+    def ShowStatistics(self):
+        sleepSeconds = 3
+        send = 0
+        recv = 0
+        recvError = 0
+        timecost = 0
 
-	for i in range(0, self._thread_num):
-	    t = threading.Thread(target=asyncStressClient.test_worker, args=(self,pqps))
-	    t.setDaemon(True)
-	    t.start()
-	    self._threads.append(t)
+        while self.running:
+            start = int(round(time.time() * 1000 * 1000))
+            time.sleep(sleepSeconds)
 
-	if remain > 0:
-	    t = threading.Thread(target=asyncStressClient.test_worker, args=(self,remain))
-	    t.setDaemon(True)
-	    t.start()
-	    self._threads.append(t)
-			
-    def showStatistics(self):
-	sleepSeconds = 3
-	send = self._send
-	recv = self._recv
-	sendError = self._sendError
-	recvError = self._recvError
-	timecost = self._timecost
+            s = 0
+            with self.countLock:
+                s = self.sendCount
+            r = 0
+            with self.countLock:
+                r = self.recvCount
+            re = 0
+            with self.countLock:
+                re = self.recvErrorCount
+            tc = 0
+            with self.countLock:
+                tc = self.timeCost
 
-	while True:
-	    start = datetime.utcnow()
-	    time.sleep(sleepSeconds)
+            ent = int(round(time.time() * 1000 * 1000))
 
-	    s = self._send
-	    r = self._recv
-	    se = self._sendError
-	    re = self._recvError
-	    tc = self._timecost
+            ds = s - send
+            dr = r - recv
+            dre = re - recvError
+            dtc = tc - timecost
 
-	    ent = datetime.utcnow()
+            send = s
+            recv = r
+            recvError = re
+            timecost = tc
 
-	    ds = s - send
-	    dr = r - recv
-	    dse = se - sendError
-	    dre = re - recvError
-	    dtc = tc - timecost
+            real_time = ent - start
 
-	    send = s
-	    recv = r
-	    sendError = se
-	    recvError = re
-	    timecost = tc
-
-	    real_time = (ent - start).microseconds
-
-	    ds = ds * 1000  / real_time
-	    dr = dr * 1000 / real_time
-		
             if dr > 0:
-	        dtc = dtc / dr
+                dtc = dtc / dr
 
-	    print("time interval: " + str(real_time / 10000.0) + " ms, send error: " + str(dse) + ", recv error: " + str(dre))
-	    print("[QPS] send: " + str(ds) + ", recv: " + str(dr) + ", per quest time cost: " + str(dtc) + " usec")
+            ds = ds * 1000 * 1000 / real_time
+            dr = dr * 1000 * 1000 / real_time
 
-    def test_worker(self, qps):
-	usec = 1000 * 1000 / qps
+            print("time interval: " + str(real_time / 1000.0) + " ms, recv error: " + str(dre))
+            print("[QPS] send: " + str(ds) + ", recv: " + str(dr) + ", per quest time cost: " + str(dtc) + " usec")
 
-        print("-- qps: " + str(qps) + ", usec: " + str(usec))
+    def TestWorker(self, obj):
+        qps = obj
+        msec = 1000 / qps
+        with self.countLock:
+            print("-- qps: " + str(qps) + ", sleep milliseconds interval: " + str(msec))
+        client = TCPClient(self.ip, self.port)
 
-	client = Fpnn.TCPClient(self._ip, self._port)
-	client.connect()
+        if not client.connect():
+            with self.countLock:
+                print("Client sync connect remote server " + self.ip + ":" + str(self.port) + " failed.")
+        
+        while self.running:
+            quest = self.GenQuest()
+            send_time = int(round(time.time() * 1000 * 1000))
+            client.send_quest(quest, MyCallback(self, send_time))
 
-	while True:
-	    send_time = datetime.utcnow()
-	
-	    try:
-                client.sendQuest('test', {"quest": "one"}, MyCallback(self, send_time))
-		self.incSend()	
-	    except Exception,e: 
-		self.incSendError()
+            with self.countLock:
+                self.sendCount += 1
 
-            sent_time = datetime.utcnow()
-            real_usec = float(float(usec - (sent_time - send_time).microseconds) / 1000000)
-
-            if real_usec > 0:
-                time.sleep(1)
-	client.close()
+            sent_time = int(round(time.time() * 1000 * 1000))
+            real_usec = msec * 1000 - (sent_time - send_time)
+            if real_usec > 1000:
+                time.sleep(real_usec / 1000.0 / 1000.0)
+            elif real_usec > 500:
+                time.sleep(0.001)
+        client.close()
 
 
-if __name__ == '__main__':
-    tester = asyncStressClient("localhost", 13697, 5, 5)
-    tester.launch()	
-    tester.showStatistics()
+if  __name__=="__main__":
+    if len(sys.argv) != 5:
+        print("Usage: asyncStressClient.py <ip> <port> <connections> <totalQPS>")
+        exit(0)
+
+    tester = Tester(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]))
+    tester.Launch()
+    tester.ShowStatistics()
