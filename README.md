@@ -56,10 +56,10 @@ client.destory()
 #### set_quest_timeout
 
 ```python
-client.set_quest_timeout(microseconds)
+client.set_quest_timeout(milliseconds)
 ```
 
-* timeout in **microseconds**, this api can set the global quest timeout, you can also set a timeout for each request individually
+* timeout in **milliseconds**, this api can set the global quest timeout, you can also set a timeout for each request individually
 
 
 
@@ -161,7 +161,7 @@ def send_quest(self, quest, callback = None, timeout = 0)
 
 * quest: **(Required | instance of Quest )**  the quest
 * callback: **(Optional | a sub-class of QuestCallback )**  used in async implementation
-* timeout: **(Optional | int )** timeout in **microseconds**, if not set, a global timeout will be used
+* timeout: **(Optional | int )** timeout in **milliseconds**, if not set, a global timeout will be used
 
 
 
