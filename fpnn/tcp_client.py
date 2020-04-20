@@ -58,8 +58,8 @@ class TCPClient(object):
         self.connection_info = TCPConnectionInfo(host, port)
         self.current_connection = None
 
-    def set_quest_timeout(self, microseconds):
-        self.quest_timeout = microseconds
+    def set_quest_timeout(self, milliseconds):
+        self.quest_timeout = milliseconds
 
     def set_quest_processor(self, processor):
         if not isinstance(processor, QuestProcessor):
