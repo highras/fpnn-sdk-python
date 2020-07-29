@@ -14,9 +14,9 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography import utils
 
-__all__ = ('ConnectionCallback', 'QuestCallback', 'QuestProcessor', 'TCPClient')
+__all__ = ('ConnectionCallback', 'QuestCallback', 'QuestProcessor', 'TCPClient', 'FPNN_SDK_VERSION')
 
-FPNN_SDK_VERSION = '2.0.1'
+FPNN_SDK_VERSION = '2.0.3'
 
 class ConnectionStatus(Enum):
     NoConnected = 1
@@ -25,7 +25,7 @@ class ConnectionStatus(Enum):
     Connected = 4
 
 class ConnectionCallback(object):
-    def connected(self, connection_id, endpoint):
+    def connected(self, connection_id, endpoint, connected):
         pass
 
     def closed(self, connection_id, endpoint, caused_by_error):
@@ -54,12 +54,27 @@ class TCPClient(object):
         self.encrypted_send_pub_key = None
         self.connect_status = ConnectionStatus.NoConnected
         self.quest_timeout = 0
+        self.connect_timeout = 0
         self.engine = ClientEngine()
         self.connection_info = TCPConnectionInfo(host, port)
         self.current_connection = None
+        self.error_recorder = None
+        self.connection_id_cache = 0
+        self.endpoint_cache = ''
+
+    def set_auto_connect(self, auto_reconnect):
+        self.auto_reconnect = auto_reconnect
+
+    def set_connect_timeout(self, milliseconds):
+        self.connect_timeout = milliseconds
 
     def set_quest_timeout(self, milliseconds):
         self.quest_timeout = milliseconds
+
+    def set_error_recorder(self, recorder):
+        self.error_recorder = recorder
+        ClientEngine.error_recorder = recorder
+
 
     def set_quest_processor(self, processor):
         if not isinstance(processor, QuestProcessor):
@@ -108,6 +123,14 @@ class TCPClient(object):
                 self.encrypted_key = hashlib.sha256(secret).digest()
         self.encrypted_send_pub_key = utils.int_to_bytes(pub_key.public_numbers().x, 32) + utils.int_to_bytes(pub_key.public_numbers().y, 32)
 
+    def connect_callback(self, connection_id, endpoint, connected):
+        if self.connection_callback != None:
+            self.connection_callback.connected(connection_id, endpoint, connected)
+
+    def close_callback(self, connection_id, endpoint, caused_by_error):
+        if self.connection_callback != None:
+            self.connection_callback.closed(connection_id, endpoint, caused_by_error)
+
     def connect(self):
         with self.lock:
             if self.connected:
@@ -119,14 +142,18 @@ class TCPClient(object):
             try:
                 server_address = (self.connection_info.host, self.connection_info.port)
                 socket_fd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                if self.connect_timeout > 0:
+                    socket_fd.settimeout(self.connect_timeout / 1000)
                 socket_fd.connect(server_address)
                 socket_fd.setblocking(False)
             except:
                 self.connect_status = ConnectionStatus.NoConnected
+                self.engine.thread_pool_execute(self.connect_callback, (0, self.connection_info.host + ':' + str(self.connection_info.port), False))
                 return False
         
             if socket_fd == 0:
                 self.connect_status = ConnectionStatus.NoConnected
+                self.engine.thread_pool_execute(self.connect_callback, (self.current_connection.connection_id, self.connection_info.host + ':' + str(self.connection_info.port), False))
                 return False
 
             self.current_connection = TCPConnection(self, self.engine, self.connection_info, socket_fd)
@@ -140,8 +167,7 @@ class TCPClient(object):
             self.connected = True
             self.connect_status = ConnectionStatus.Connected
 
-            if self.connection_callback != None:
-                self.connection_callback.connected(self.current_connection.connection_id, self.connection_info.host + ':' + str(self.connection_info.port))
+            self.engine.thread_pool_execute(self.connect_callback, (self.current_connection.connection_id, self.connection_info.host + ':' + str(self.connection_info.port), True))
 
             self.engine.join(self.current_connection)
 
@@ -161,8 +187,7 @@ class TCPClient(object):
                 if answer.is_error():
                     self.engine.quit(self.current_connection)
                     self.current_connection.clean_callback()
-                    if self.current_connection.connection_callback != None:
-                        self.current_connection.connection_callback.closed(self.current_connection.connection_id, self.current_connection.connection_info.host + ':' + str(self.current_connection.connection_info.port), True)
+                    self.engine.thread_pool_execute(self.close_callback, (self.current_connection.connection_id, self.connection_info.host + ':' + str(self.connection_info.port), True))
                     self.current_connection = None
                     self.connected = False
                     self.connect_status = ConnectionStatus.NoConnected
@@ -174,14 +199,11 @@ class TCPClient(object):
         with self.lock:
             if not self.connected:
                 return
-
             if self.current_connection != None:
                 self.engine.quit(self.current_connection)
+                self.current_connection = None
                 self.current_connection.clean_callback()
-                if self.current_connection.connection_callback != None:
-                    self.current_connection.connection_callback.closed(self.current_connection.connection_id, self.current_connection.connection_info.host + ':' + str(self.current_connection.connection_info.port), False)
-        
-            self.current_connection = None
+                self.engine.thread_pool_execute(self.close_callback, (self.current_connection.connection_id, self.connection_info.host + ':' + str(self.connection_info.port), False))
             self.connected = False
             self.connect_status = ConnectionStatus.NoConnected
 
@@ -210,7 +232,7 @@ class TCPClient(object):
                 if not self.connect():
                     answer = Answer()
                     answer.sequnce_num = quest.sequnce_num
-                    answer.set_error(FPNN_ERROR.FPNN_EC_CONNECT_ERROR.value, 'connect error')
+                    answer.set_error(FPNN_ERROR.FPNN_EC_CORE_INVALID_CONNECTION.value, 'invalid connection')
                     if is_async:
                         callback.callback(answer)
                         return None
@@ -219,7 +241,7 @@ class TCPClient(object):
             else:
                 answer = Answer()
                 answer.sequnce_num = quest.sequnce_num
-                answer.set_error(FPNN_ERROR.FPNN_EC_CONNECTION_NOT_CONNECTED.value, 'connection not connected')
+                answer.set_error(FPNN_ERROR.FPNN_EC_CORE_INVALID_CONNECTION.value, 'invalid connection')
                 if is_async:
                     callback.callback(answer)
                     return None

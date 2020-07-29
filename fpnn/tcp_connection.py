@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from .quest import *
 from .tcp_client import *
 from .fpnn_error import *
+from .client_engine import *
 
 class ReadPackageStep(Enum):
     READ_HEADER_NO_ENCRYPTOR = 1
@@ -114,13 +115,17 @@ class TCPConnection(object):
                 self.engine.require_write(self)
             except:
                 pass
-    
+
+    def close_callback(self, connection_id, endpoint, caused_by_error):
+        if self.connection_callback != None:
+            self.connection_callback.closed(connection_id, endpoint, caused_by_error)
+
     def send_answer(self, answer):
         buffer = answer.raw()
         if self.connection_info.encrypted:
             encrypt_buffer = self.encrypt(buffer, True)
             buffer = struct.pack('<I' + str(len(buffer)) + 's', len(buffer), encrypt_buffer)
-        
+
         with self.write_lock:
             try:
                 self.out_queue.append(buffer)
@@ -139,14 +144,13 @@ class TCPConnection(object):
         if invalid:
             self.engine.quit_in_loop(self)
             self.clean_callback()
-            if self.connection_callback != None:
-                self.connection_callback.closed(self.connection_id, self.connection_info.host + ':' + str(self.connection_info.port), True)
+            self.engine.thread_pool_execute(self.close_callback, (self.connection_id, self.connection_info.host + ':' + str(self.connection_info.port), True))
             self.client.notice_closed()
 
     def clean_callback(self):
         answer = Answer()
         answer.sequnce_num = 0
-        answer.set_error(FPNN_ERROR.FPNN_EC_CONNECTION_IS_CLOSE.value, 'connection is closed')
+        answer.set_error(FPNN_ERROR.FPNN_EC_CORE_CONNECTION_CLOSED.value, 'connection is closed')
         with self.callback_lock:
             for (socket_fd, callback) in  self.callback_map.items(): 
                 if callback != None:
@@ -154,13 +158,13 @@ class TCPConnection(object):
                         callback.sync_answer = answer
                         callback.sync_semaphore.release()
                     elif callback.callback != None:
-                        self.engine.thread_pool.submit(callback.callback.callback, answer)
+                        self.engine.thread_pool_execute(callback.callback.callback, (answer, ))
             self.callback_map.clear()
 
     def check_timeout(self):
         answer = Answer()
         answer.sequnce_num = 0
-        answer.set_error(FPNN_ERROR.FPNN_EC_QUEST_TIMEOUT.value, 'quest timeout')
+        answer.set_error(FPNN_ERROR.FPNN_EC_CORE_TIMEOUT.value, 'quest timeout')
         now = int(round(time.time() * 1000))
         with self.callback_lock:
             del_callback_set = set()
@@ -171,7 +175,7 @@ class TCPConnection(object):
                             callback.sync_answer = answer
                             callback.sync_semaphore.release()
                         elif callback.callback != None:
-                            self.engine.thread_pool.submit(callback.callback.callback, answer)
+                            self.engine.thread_pool_execute(callback.callback.callback, (answer, ))
                         del_callback_set.add(socket_fd)
             for s in del_callback_set:
                 del self.callback_map[s]
@@ -195,8 +199,12 @@ class TCPConnection(object):
                                 buffer = buffer[send:]
                             continue
                         else:
+                            if ClientEngine.error_recorder != None:
+                                ClientEngine.error_recorder.record_error("write socket got error: " + error.errno)
                             return True
                     except:
+                        if ClientEngine.error_recorder != None:
+                            ClientEngine.error_recorder.record_error("write socket got exception")
                         return True
 
                     if send == len(buffer):
@@ -220,8 +228,12 @@ class TCPConnection(object):
                 elif error.errno == errno.EINTR:
                     continue
                 else:
+                    if ClientEngine.error_recorder != None:
+                        ClientEngine.error_recorder.record_error("read socket got error: " + error.errno)
                     return True
             except:
+                if ClientEngine.error_recorder != None:
+                    ClientEngine.error_recorder.record_error("write socket got exception")
                 return True
 
             if buffer != None and len(buffer) > 0:
@@ -311,9 +323,13 @@ class TCPConnection(object):
 
     def process_quest(self, obj, quest):
         processor_connection_info = ProcessorConnectionInfo(self, quest)
-        answer = obj(processor_connection_info, quest)
-        if not quest.oneway and answer != None:
-            processor_connection_info.send_answer(answer)
+        try:
+            answer = obj(processor_connection_info, quest)
+            if not quest.oneway and answer != None:
+                processor_connection_info.send_answer(answer)
+        except Exception as ex:
+            if ClientEngine.error_recorder != None:
+                ClientEngine.error_recorder.record_error(str(ex))
 
     def unpack_fix_bin(self, payload):
         try:
@@ -324,8 +340,7 @@ class TCPConnection(object):
             fixBinData = {}
             for (key, value) in data.items():
                 fixBinData[str(key, encoding = "utf8")] = value
-            data = fixBinData
-            return data
+            return fixBinData
 
     def handle_package(self, package):
         if package.mtype == FpnnMType.FPNN_MT_ONEWAY.value:
@@ -340,7 +355,7 @@ class TCPConnection(object):
             quest.sequnce_num = package.sequnce_num
             quest.params_map = self.unpack_fix_bin(package.payload)
             obj = getattr(self.processor, method)
-            self.engine.thread_pool.submit(obj, ProcessorConnectionInfo(self, quest), quest)
+            self.engine.thread_pool_execute(obj, (ProcessorConnectionInfo(self, quest), quest))
         elif package.mtype == FpnnMType.FPNN_MT_TWOWAY.value:
             if self.processor == None:
                 return
@@ -353,7 +368,7 @@ class TCPConnection(object):
             quest.sequnce_num = package.sequnce_num
             quest.params_map = self.unpack_fix_bin(package.payload)
             obj = getattr(self.processor, method)
-            self.engine.thread_pool.submit(self.process_quest, obj, quest)
+            self.engine.thread_pool_execute(self.process_quest, (obj, quest))
         elif package.mtype == FpnnMType.FPNN_MT_ANSWER.value:
             callback = None
             with self.callback_lock:
@@ -367,11 +382,11 @@ class TCPConnection(object):
             if package.ss == 0:
                 answer.set_params(data)
             else:
-                answer.set_error(data.get("code", FPNN_ERROR.FPNN_EC_UNKNOWN_ERROR.value), data.get("ex", "unknown error"))
+                answer.set_error(data.get("code", FPNN_ERROR.FPNN_EC_PROTO_UNKNOWN_ERROR.value), data.get("ex", "unknown error"))
 
             if callback != None:
                 if callback.sync_semaphore != None:
                     callback.sync_answer = answer
                     callback.sync_semaphore.release()
                 elif callback.callback != None:
-                    self.engine.thread_pool.submit(callback.callback.callback, answer)
+                    self.engine.thread_pool_execute(callback.callback.callback, (answer, ))

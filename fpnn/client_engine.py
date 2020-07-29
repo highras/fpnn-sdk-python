@@ -7,6 +7,7 @@ import threading
 import selectors
 import socket
 from concurrent.futures import ThreadPoolExecutor
+from .thread_pool import *
 
 class ReadySocketInfo(object):
     def __init__(self, sock, read, write):
@@ -16,6 +17,7 @@ class ReadySocketInfo(object):
 
 class ClientEngine(object):
     _instance_lock = threading.Lock()
+    error_recorder = None
 
     def __new__(cls, *args, **kw):
         if not hasattr(ClientEngine, "_instance"):
@@ -33,7 +35,7 @@ class ClientEngine(object):
         self.loop_thread = None
         self.lock = threading.Lock()
         self.want_write_lock = threading.Lock()
-        self.thread_pool = ThreadPoolExecutor()
+        self.thread_pool_executor = ThreadPool()
         self.notify_lock = threading.Lock()
         self.read_notify_fd, self.write_notify_fd = os.pipe()
         os.set_blocking(self.read_notify_fd, False)
@@ -75,6 +77,9 @@ class ClientEngine(object):
         with self.lock:
             for (socket_fd, connection) in  self.connection_map.items(): 
                 connection.check_timeout()
+
+    def thread_pool_execute(self, fn, args):
+        self.thread_pool_executor.run(fn, args)
 
     def loop(self):
         selector = selectors.DefaultSelector()
@@ -160,6 +165,8 @@ class ClientEngine(object):
         self.next_loop()
 
     def quit(self, connection):
+        if connection == None:
+            return
         with self.lock:
             del self.connection_map[connection.socket]
             self.quit_socket_set.add(connection.socket)
@@ -167,6 +174,8 @@ class ClientEngine(object):
 
     def quit_in_loop(self, connection):
         # no lock for run in IO loop thread
+        if connection == None:
+            return
         del self.connection_map[connection.socket]
         self.quit_socket_set.add(connection.socket)
         self.next_loop()
@@ -194,11 +203,15 @@ class ClientEngine(object):
             try:
                 os.read(self.read_notify_fd, 1)
             except BlockingIOError as error:
+                if ClientEngine.error_recorder != None:
+                    ClientEngine.error_recorder.record_error("consume notify got BlockingIOError")
                 break
             except IOError as error:
                 if error.errno == errno.EAGAIN or error.errno == errno.EWOULDBLOCK or error.errno == errno.EINTR:
                     continue
                 else:
+                    if ClientEngine.error_recorder != None:
+                        ClientEngine.error_recorder.record_error("consume notify got error: " + error.errno)
                     break
 
 
