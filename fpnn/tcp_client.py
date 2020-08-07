@@ -153,7 +153,7 @@ class TCPClient(object):
         
             if socket_fd == 0:
                 self.connect_status = ConnectionStatus.NoConnected
-                self.engine.thread_pool_execute(self.connect_callback, (self.current_connection.connection_id, self.connection_info.host + ':' + str(self.connection_info.port), False))
+                self.engine.thread_pool_execute(self.connect_callback, (0, self.connection_info.host + ':' + str(self.connection_info.port), False))
                 return False
 
             self.current_connection = TCPConnection(self, self.engine, self.connection_info, socket_fd)
