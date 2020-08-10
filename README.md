@@ -73,8 +73,8 @@ client.set_connection_callback(callback)
 
 ```python
 class MyConnectionCallback(ConnectionCallback):
-    def connected(self, connection_id, endpoint):
-        print("connected")
+    def connected(self, connection_id, endpoint, connected):
+        print(connected)
         print(connection_id)
         print(endpoint)
 
