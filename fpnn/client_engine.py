@@ -62,6 +62,7 @@ class ClientEngine(object):
             self.check_thread.join()
         self.read_notify.close()
         self.write_notify.close()
+        self.thread_pool_executor.close()
 
     def check(self):
         while self.running:

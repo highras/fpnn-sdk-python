@@ -201,9 +201,9 @@ class TCPClient(object):
                 return
             if self.current_connection != None:
                 self.engine.quit(self.current_connection)
-                self.current_connection = None
                 self.current_connection.clean_callback()
                 self.engine.thread_pool_execute(self.close_callback, (self.current_connection.connection_id, self.connection_info.host + ':' + str(self.connection_info.port), False))
+                self.current_connection = None
             self.connected = False
             self.connect_status = ConnectionStatus.NoConnected
 
