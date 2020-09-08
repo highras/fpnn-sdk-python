@@ -20,10 +20,11 @@ if  __name__=="__main__":
     #client.enable_encryptor_by_pem_file('test-public.pem')
 
     class MyConnectionCallback(ConnectionCallback):
-        def connected(self, connection_id, endpoint):
+        def connected(self, connection_id, endpoint, connected):
             print("connected")
             print(connection_id)
             print(endpoint)
+            print(connected)
 
         def closed(self, connection_id, endpoint, caused_by_error):
             print("closed")
