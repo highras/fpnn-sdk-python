@@ -192,7 +192,7 @@ class TCPConnection(object):
                         if error.errno == errno.EAGAIN or error.errno == errno.EWOULDBLOCK:
                             if send > 0:
                                 buffer = buffer[send:]
-                                self.out_queue[0] = buffer
+                            self.out_queue[0] = buffer
                             return False
                         elif error.errno == errno.EINTR:
                             if send > 0:
